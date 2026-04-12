@@ -365,7 +365,12 @@ def fine_tune(image, strokes, model, device, iters=1000):
     optimizer = torch.optim.AdamW([strokes, beta], lr=0.001, betas=(0.9, 0.95))
     for _ in range(iters + 1):
         new_beta = SignWithSigmoidGrad.apply(beta)
-        pred_strokes = torch.cat([strokes, new_beta], dim=-1)
+        if strokes.size(-1) == 27:
+            pred_strokes = torch.cat([strokes, new_beta], dim=-1)
+        elif strokes.size(-1) == 28:
+            pred_strokes = torch.cat([strokes[:, :, :-1], new_beta], dim=-1)
+        else:
+            raise ValueError(f"Unsupported stroke dim {strokes.size(-1)} in fine_tune. Expected 27 or 28.")
         output = model.rendering(pred_strokes)[:, :3, :, :]
         loss_num = new_beta.sum()
         loss_pixel = ((output - target) ** 2).mean()

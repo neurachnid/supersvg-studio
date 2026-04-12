@@ -112,7 +112,7 @@ python inference.py \
   --output_dir output \
   --device cuda \
   --path_num 1000 \
-  --optimize_iter 0
+  --optimize_iter 10
 ```
 
 ### Important Arguments
