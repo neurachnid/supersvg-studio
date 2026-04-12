@@ -1,0 +1,46 @@
+# SuperSVG generated outputs
+output/
+test_images/
+
+# Model checkpoints and large artifacts
+weights/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# diffvg local build outputs
+diffvg/build/
+diffvg/dist/
+diffvg/diffvg.egg-info/
+diffvg/compile_commands.json
+diffvg/apps/results/
+diffvg/apps/files/
+
+# Native compiled modules
+*.so
+*.dylib
+*.dll
+*.pyd
+
+# Logs and temp files
+*.log
+tmp/
+temp/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
