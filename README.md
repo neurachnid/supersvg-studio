@@ -9,7 +9,7 @@
 [Paul L. Rosin](https://scholar.google.com/citations?hl=zh-CN&user=V5E7JXsAAAAJ),
 and [Yu-Kun Lai](https://scholar.google.com/citations?user=0i-Nzv0AAAAJ&hl=zh-CN&oi=sra)
 
-![framework](https://raw.githubusercontent.com/sjtuplayer/SuperSVG/master/imgs/framework.jpg)
+![framework](assets/framework.png)
 
 This repository keeps a practical coarse-to-refine inference pipeline for generating SVG paths from raster images.
 
