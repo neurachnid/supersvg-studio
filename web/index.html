@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#111310" />
     <title>SuperSVG Studio</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/help.css" />
   </head>
   <body>
     <main class="app-shell">
@@ -78,6 +79,10 @@
               <label>Path penalty<input id="pathPenalty" type="number" min="0" max="0.001" step="0.000001" value="0.000001" /></label>
             </div>
           </details>
+          <section class="setting-info" id="settingInfo" aria-live="polite">
+            <strong id="settingInfoTitle">Setting help</strong>
+            <p id="settingInfoBody">Hover over or focus a setting to see how low and high values affect the result.</p>
+          </section>
         </div>
 
         <footer class="sidebar-footer">

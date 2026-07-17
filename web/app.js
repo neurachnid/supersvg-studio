@@ -103,6 +103,32 @@ function updateSettingsWarning() {
   } else warning.classList.add("hidden");
 }
 updateSettingsLimits();
+const settingHelp = {
+  pathNum: ["Path count", "Sets the final number of SVG paths. Low: simpler, smaller and faster output with less detail. High: captures more detail, but takes longer and uses more GPU memory."],
+  refinePaths: ["Refine density", "Estimated paths assigned to each refinement superpixel. Low: more, smaller regions and finer placement. High: fewer, larger regions and faster refinement."],
+  optimizeIter: ["Fine-tune passes", "DiffVG optimization passes after neural vectorization. Low: fast and close to the neural result. High: closer pixel matching with substantially longer processing."],
+  device: ["Device", "Chooses the inference processor. CPU is slower and restricted. CUDA uses the GPU and is strongly recommended."],
+  batchSize: ["Batch size", "Refinement regions processed together. Low: less GPU memory but more batches. High: faster when memory allows, but may cause an out-of-memory error."],
+  seed: ["Seed", "Controls deterministic initialization. Different values may produce slightly different paths; it is not a quality scale."],
+  coarseRegionSize: ["Coarse region size", "Target paths represented by each initial superpixel. Low: more, smaller coarse regions. High: fewer, larger regions and faster processing."],
+  coarseMargin: ["Coarse margin", "Extra render pixels around coarse crops. Low: paths stay close to region boundaries. High: paths can cross farther, reducing seams but increasing overlap."],
+  refineMargin: ["Refine margin", "Extra render pixels around refinement crops. Low: tightly localized paths. High: more cross-boundary freedom and overlap."],
+  workingResolution: ["Working resolution", "Maximum internal raster dimension. Low: faster and lighter, but loses small details. High: sharper detail with much higher time and memory cost."],
+  coarseCompactness: ["Coarse compactness", "Balances color boundaries against regular region shape. Low: follows image colors and edges. High: creates more uniform, geometric regions."],
+  refineCompactness: ["Refine compactness", "Controls refinement superpixel shape. Low: follows local color boundaries. High: produces more regular spatial regions."],
+  slicSigma: ["SLIC smoothing", "Blurs the image before segmentation. Low: preserves texture, noise and fine edges. High: suppresses noise and favors larger, smoother structures."],
+  learningRate: ["Learning rate", "How far DiffVG moves parameters per pass. Low: stable, subtle changes needing more passes. High: faster changes that may overshoot or become unstable."],
+  pathPenalty: ["Path penalty", "Penalizes active paths during fine-tuning. Low: preserves paths and detail. High: disables more paths for a simpler SVG, potentially losing detail."]
+};
+function showSettingHelp(target) {
+  const field = target.closest("label")?.querySelector("input, select"), help = field && settingHelp[field.id];
+  if (!help) return;
+  $("settingInfoTitle").textContent = help[0]; $("settingInfoBody").textContent = help[1];
+}
+document.querySelectorAll(".control, .advanced-grid label").forEach(label => {
+  label.addEventListener("mouseenter", e => showSettingHelp(e.currentTarget));
+  label.addEventListener("focusin", e => showSettingHelp(e.currentTarget));
+});
 $("resetButton").addEventListener("click", () => {
   els.pathNum.value = 1000; els.refine.value = 8; els.optimize.value = 0;
   [els.pathNum, els.refine, els.optimize].forEach(el => el.dispatchEvent(new Event("input")));
