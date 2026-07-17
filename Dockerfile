@@ -70,7 +70,7 @@ COPY models ./models
 COPY util ./util
 COPY web ./web
 
-RUN useradd --create-home --uid 1000 app \
+RUN useradd --create-home --uid 10001 app \
     && mkdir -p /data/weights /data/huggingface /tmp/supersvg-matplotlib \
     && chown -R app:app /app /data /opt/supersvg-weights /tmp/supersvg-matplotlib
 
