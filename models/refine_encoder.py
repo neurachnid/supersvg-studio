@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 from collections import OrderedDict
@@ -10,7 +11,12 @@ from torchvision import models
 from util.refine_utils import SignWithSigmoidGrad
 
 #32,64,128, vit pretrain=True,num_loss=False
-DINO_CKPT_PATH = Path(__file__).resolve().parents[1] / "weights" / "dino_deitsmall16_pretrain.pth"
+DINO_CKPT_PATH = Path(
+    os.environ.get(
+        "SUPERSVG_DINO_CKPT",
+        Path(__file__).resolve().parents[1] / "weights" / "dino_deitsmall16_pretrain.pth",
+    )
+)
 
 class StrokeConvHeadBlock(nn.Module):
     def __init__(self, stroke_num, stroke_dim):
@@ -192,8 +198,7 @@ class StrokeAttentionPredictor(nn.Module):
     def __init__(self, stroke_num=512, stroke_dim=13, self_attn_depth=1,control_num=False,num_loss=False,init=False,supersvg_version=False):
         super(StrokeAttentionPredictor, self).__init__()
         self.feature_extractor = timm.create_model('vit_small_patch16_224_dino', pretrained=False)
-        local_dino = Path(__file__).resolve().parents[1] / "weights" / "dino_deitsmall16_pretrain.pth"
-        self.feature_extractor.load_state_dict(torch.load(str(local_dino), map_location="cpu"))
+        self.feature_extractor.load_state_dict(torch.load(str(DINO_CKPT_PATH), map_location="cpu"))
         if num_loss:   #only coarse model has num loss
             self.stroke_head = StrokeAttentionHead_coarse(stroke_num=stroke_num, stroke_dim=stroke_dim,
                                                    encoder_embed_dim=self.feature_extractor.embed_dim,

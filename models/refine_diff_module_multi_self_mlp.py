@@ -1,3 +1,4 @@
+import os
 import torch.nn as nn
 import torch
 import timm
@@ -54,7 +55,12 @@ class DiffAddModel(nn.Module):
         self.fusion_conv = FusionConvNet(input_dim=9)
         self.add_canvas = add_canvas
         self.diff_feature_extractor1 = timm.create_model('vit_small_patch16_224_dino', pretrained=False)
-        local_dino = Path(__file__).resolve().parents[1] / "weights" / "dino_deitsmall16_pretrain.pth"
+        local_dino = Path(
+            os.environ.get(
+                "SUPERSVG_DINO_CKPT",
+                Path(__file__).resolve().parents[1] / "weights" / "dino_deitsmall16_pretrain.pth",
+            )
+        )
         self.diff_feature_extractor1.load_state_dict(torch.load(str(local_dino), map_location="cpu"))
         self.cross_attn_block = CrossAttentionBlock(x_dim=self.diff_feature_extractor1.embed_dim, y_dim=hidden_dim,
                                                     num_heads=min(stroke_num, 8))
@@ -169,6 +175,5 @@ class AttnPainterSVG(nn.Module):
             pydiffvg.save_svg(save_svg_path, self.width, self.width, shapes, groups)
           
         return imgs
-
 
 
