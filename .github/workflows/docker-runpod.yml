@@ -28,7 +28,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            felonioustrump/supersvg-studio:runpod
-            felonioustrump/supersvg-studio:${{ github.sha }}
+            gusludlow/supersvg-studio:runpod
+            gusludlow/supersvg-studio:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
