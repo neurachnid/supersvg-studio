@@ -110,6 +110,8 @@ class VectorizeRequest(BaseModel):
     slic_sigma: float = Field(default=5.0, ge=0.0, le=20.0)
     learning_rate: float = Field(default=0.001, ge=0.00001, le=0.01)
     path_penalty: float = Field(default=0.000001, ge=0.0, le=0.001)
+    slic_zero: bool = False
+    adaptive_split: float = Field(default=0.0, ge=0.0, le=1.0)
     seed: int = Field(default=0, ge=0, le=999999)
     device: str = Field(default="cuda", pattern="^(cuda|cpu)$")
 
@@ -222,9 +224,13 @@ def vectorize(payload: VectorizeRequest):
                 str(payload.learning_rate),
                 "--path_penalty",
                 str(payload.path_penalty),
+                "--adaptive_split",
+                str(payload.adaptive_split),
                 "--seed",
                 str(payload.seed),
             ]
+            if payload.slic_zero:
+                command.append("--slic_zero")
             process = subprocess.Popen(
                 command,
                 cwd=ROOT,

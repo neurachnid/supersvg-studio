@@ -11,6 +11,7 @@ import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 from PIL import Image
 from skimage.segmentation import mark_boundaries, slic
+from skimage.filters import sobel
 from torchvision.utils import save_image
 
 from models.attn_painter_superpixel import AttnPainterSVG
@@ -74,6 +75,8 @@ def get_args_parser():
     parser.add_argument("--slic_sigma", type=float, default=5.0)
     parser.add_argument("--learning_rate", type=float, default=0.001)
     parser.add_argument("--path_penalty", type=float, default=1e-6)
+    parser.add_argument("--slic_zero", action="store_true", help="use adaptive-compactness SLICO")
+    parser.add_argument("--adaptive_split", type=float, default=0.0, help="reallocate coarse regions toward detailed areas")
     return parser
 
 
@@ -185,19 +188,62 @@ def count_active_paths(strokes):
     return int(strokes.size(1))
 
 
-def save_slic_diagnostic(image, render_size, num_segments, sigma, compactness, output_path):
+def build_coarse_segments(image_np, num_segments, sigma, compactness, slic_zero=False, adaptive_split=0.0):
+    adaptive_split = float(max(0.0, min(1.0, adaptive_split)))
+    if adaptive_split <= 0 or num_segments <= 2:
+        return slic(image_np, n_segments=num_segments, sigma=sigma, compactness=compactness, slic_zero=slic_zero)
+
+    base_count = max(1, int(round(num_segments * (1.0 - 0.5 * adaptive_split))))
+    base = slic(image_np, n_segments=base_count, sigma=sigma, compactness=compactness, slic_zero=slic_zero)
+    labels = list(range(1, int(base.max()) + 1))
+    extra_budget = max(0, num_segments - len(labels))
+    gray = image_np.mean(axis=2)
+    edges = sobel(gray)
+    scores = []
+    for label in labels:
+        mask = base == label
+        pixels = image_np[mask]
+        detail = float(edges[mask].mean()) + float(pixels.std(axis=0).mean())
+        scores.append(max(detail, 1e-6))
+    allocations = np.ones(len(labels), dtype=np.int32)
+    if extra_budget:
+        weights = np.asarray(scores, dtype=np.float64)
+        weights /= weights.sum()
+        raw = weights * extra_budget
+        allocations += np.floor(raw).astype(np.int32)
+        for index in np.argsort(raw - np.floor(raw))[::-1][: extra_budget - int(np.floor(raw).sum())]:
+            allocations[index] += 1
+
+    result = np.zeros(base.shape, dtype=np.int32)
+    next_label = 1
+    for label, child_count in zip(labels, allocations):
+        mask = base == label
+        if child_count <= 1 or int(mask.sum()) < child_count * 4:
+            result[mask] = next_label
+            next_label += 1
+            continue
+        children = slic(image_np, n_segments=int(child_count), sigma=sigma, compactness=compactness, slic_zero=slic_zero, mask=mask, start_label=1)
+        for child in range(1, int(children.max()) + 1):
+            child_mask = mask & (children == child)
+            if child_mask.any():
+                result[child_mask] = next_label
+                next_label += 1
+    return result
+
+
+def save_slic_diagnostic(image, render_size, num_segments, sigma, compactness, output_path, slic_zero=False, adaptive_split=0.0):
     image_np = np.array(image.resize(render_size)) / 255.0
-    segments = slic(image_np, n_segments=num_segments, sigma=sigma, compactness=compactness)
+    segments = build_coarse_segments(image_np, num_segments, sigma, compactness, slic_zero, adaptive_split)
     overlay = (mark_boundaries(image_np, segments, color=(1.0, 0.2, 0.1), mode="thick") * 255).astype(np.uint8)
     Image.fromarray(overlay).save(output_path)
 
 
 @torch.inference_mode()
-def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=2, compactness=50.0, sigma=5.0, context_strength=0.0, diagnostic_path=None):
+def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=2, compactness=50.0, sigma=5.0, context_strength=0.0, diagnostic_path=None, slic_zero=False, adaptive_split=0.0):
     model.width = render_size[0]
     model.height = render_size[1]
     image_np = np.array(image.resize(render_size)) / 255.0
-    segments = torch.from_numpy(slic(image_np, n_segments=num_of_segments, sigma=sigma, compactness=compactness))
+    segments = torch.from_numpy(build_coarse_segments(image_np, num_of_segments, sigma, compactness, slic_zero, adaptive_split))
     image_tensor = torch.from_numpy(image_np).permute(2, 0, 1)
     _, h, w = image_tensor.size()
 
@@ -498,11 +544,11 @@ def main(args):
         coarse_model.width = render_w
         coarse_model.height = render_h
         slic_path = output_dir / f"{image_path.stem}.coarse-slic.png"
-        save_slic_diagnostic(image, render_size, num_of_segments, args.slic_sigma, args.coarse_compactness, slic_path)
+        save_slic_diagnostic(image, render_size, num_of_segments, args.slic_sigma, args.coarse_compactness, slic_path, args.slic_zero, args.adaptive_split)
         print(f"SUPERSVG_DIAGNOSTIC slic {slic_path}", flush=True)
         report_progress(int(file_start + file_span * 0.12), "Building coarse vector paths")
         crop_diagnostic_path = output_dir / f"{image_path.stem}.coarse-crops.png"
-        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size, margin=args.coarse_margin, compactness=args.coarse_compactness, sigma=args.slic_sigma, context_strength=args.coarse_context_strength, diagnostic_path=crop_diagnostic_path)
+        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size, margin=args.coarse_margin, compactness=args.coarse_compactness, sigma=args.slic_sigma, context_strength=args.coarse_context_strength, diagnostic_path=crop_diagnostic_path, slic_zero=args.slic_zero, adaptive_split=args.adaptive_split)
         print(f"SUPERSVG_DIAGNOSTIC crops {crop_diagnostic_path}", flush=True)
         coarse_svg_path = output_dir / f"{image_path.stem}.coarse.svg"
         coarse_model.rendering(coarse_strokes, save_svg_path=str(coarse_svg_path))

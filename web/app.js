@@ -141,6 +141,8 @@ const settingHelp = {
   coarseCompactness: ["Coarse compactness", "Balances color boundaries against regular region shape. Low: follows image colors and edges. High: creates more uniform, geometric regions."],
   refineCompactness: ["Refine compactness", "Controls refinement superpixel shape. Low: follows local color boundaries. High: produces more regular spatial regions."],
   slicSigma: ["SLIC smoothing", "Blurs the image before segmentation. Low: preserves texture, noise and fine edges. High: suppresses noise and favors larger, smoother structures."],
+  segmentationMode: ["Segmentation mode", "SLIC uses the selected global compactness. SLICO adapts compactness locally, helping images that mix smooth areas with detailed boundaries."],
+  adaptiveSplit: ["Adaptive allocation", "Redistributes the fixed coarse-region budget using edge and color detail. Low: uniform global SLIC allocation. High: fewer regions on smooth areas and more around text, edges and complex color changes."],
   learningRate: ["Learning rate", "How far DiffVG moves parameters per pass. Low: stable, subtle changes needing more passes. High: faster changes that may overshoot or become unstable."],
   pathPenalty: ["Path penalty", "Penalizes active paths during fine-tuning. Low: preserves paths and detail. High: disables more paths for a simpler SVG, potentially losing detail."]
 };
@@ -160,6 +162,7 @@ $("resetButton").addEventListener("click", () => {
   $("batchSize").value = "64"; $("seed").value = 0;
   $("coarseRegionSize").value = 64; $("coarseMargin").value = 2; $("coarseContext").value = 0; $("refineMargin").value = 0; $("workingResolution").value = "512";
   $("coarseCompactness").value = 50; $("refineCompactness").value = 20; $("slicSigma").value = 5;
+  $("segmentationMode").value = "slic"; $("adaptiveSplit").value = 0;
   $("learningRate").value = 0.001; $("pathPenalty").value = 0.000001;
 });
 
@@ -242,7 +245,8 @@ async function vectorize() {
         coarse_paths_per_segment: Number($("coarseRegionSize").value), coarse_margin: Number($("coarseMargin").value), coarse_context_strength: Number($("coarseContext").value),
         refine_margin: Number($("refineMargin").value), working_resolution: Number($("workingResolution").value),
         coarse_compactness: Number($("coarseCompactness").value), refine_compactness: Number($("refineCompactness").value),
-        slic_sigma: Number($("slicSigma").value), learning_rate: Number($("learningRate").value), path_penalty: Number($("pathPenalty").value)
+        slic_sigma: Number($("slicSigma").value), slic_zero: $("segmentationMode").value === "slico", adaptive_split: Number($("adaptiveSplit").value),
+        learning_rate: Number($("learningRate").value), path_penalty: Number($("pathPenalty").value)
       })
     });
     if (!response.ok) {
