@@ -25,3 +25,18 @@
 .advanced-grid label:hover {
   color: #e8ebe4;
 }
+
+.diagnostic-select {
+  position: absolute;
+  left: 14px;
+  height: 30px;
+  max-width: 180px;
+  padding: 0 8px;
+  border: 1px solid #343832;
+  border-radius: 6px;
+  background: #1c1e1b;
+  color: #dfe3da;
+  font-size: 10px;
+}
+
+.diagnostic-select:disabled { opacity: .4; }

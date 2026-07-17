@@ -254,6 +254,14 @@ def vectorize(payload: VectorizeRequest):
                             event = {"type": "preview", "svg": preview_path.read_text(encoding="utf-8")}
                         else:
                             event = {"type": "log", "message": "Initial SVG preview was not found."}
+                    elif line.startswith("SUPERSVG_DIAGNOSTIC "):
+                        _, name, artifact = line.split(" ", 2)
+                        artifact_path = Path(artifact)
+                        if artifact_path.suffix.lower() == ".svg":
+                            event = {"type": "diagnostic", "name": name, "kind": "svg", "data": artifact_path.read_text(encoding="utf-8")}
+                        else:
+                            encoded_artifact = base64.b64encode(artifact_path.read_bytes()).decode("ascii")
+                            event = {"type": "diagnostic", "name": name, "kind": "image", "data": f"data:image/png;base64,{encoded_artifact}"}
                     else:
                         event = {"type": "log", "message": line}
                     yield json.dumps(event) + "\n"

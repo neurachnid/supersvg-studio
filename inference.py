@@ -10,7 +10,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 from PIL import Image
-from skimage.segmentation import slic
+from skimage.segmentation import mark_boundaries, slic
 from torchvision.utils import save_image
 
 from models.attn_painter_superpixel import AttnPainterSVG
@@ -182,6 +182,13 @@ def count_active_paths(strokes):
     if strokes.size(-1) >= 28:
         return int((strokes[0, :, -1] > 0.5).sum().item())
     return int(strokes.size(1))
+
+
+def save_slic_diagnostic(image, render_size, num_segments, sigma, compactness, output_path):
+    image_np = np.array(image.resize(render_size)) / 255.0
+    segments = slic(image_np, n_segments=num_segments, sigma=sigma, compactness=compactness)
+    overlay = (mark_boundaries(image_np, segments, color=(1.0, 0.2, 0.1), mode="thick") * 255).astype(np.uint8)
+    Image.fromarray(overlay).save(output_path)
 
 
 @torch.inference_mode()
@@ -478,8 +485,14 @@ def main(args):
 
         coarse_model.width = render_w
         coarse_model.height = render_h
+        slic_path = output_dir / f"{image_path.stem}.coarse-slic.png"
+        save_slic_diagnostic(image, render_size, num_of_segments, args.slic_sigma, args.coarse_compactness, slic_path)
+        print(f"SUPERSVG_DIAGNOSTIC slic {slic_path}", flush=True)
         report_progress(int(file_start + file_span * 0.12), "Building coarse vector paths")
         coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size, margin=args.coarse_margin, compactness=args.coarse_compactness, sigma=args.slic_sigma)
+        coarse_svg_path = output_dir / f"{image_path.stem}.coarse.svg"
+        coarse_model.rendering(coarse_strokes, save_svg_path=str(coarse_svg_path))
+        print(f"SUPERSVG_DIAGNOSTIC coarse {coarse_svg_path}", flush=True)
         report_progress(int(file_start + file_span * 0.48), "Refining vector regions")
         final_strokes = global_slic_refine_once(
             image=image,
@@ -504,6 +517,7 @@ def main(args):
         initial_svg_path = output_dir / f"{image_path.stem}.initial.svg"
         coarse_model.rendering(final_strokes, save_svg_path=str(initial_svg_path))
         print(f"SUPERSVG_PREVIEW {initial_svg_path}", flush=True)
+        print(f"SUPERSVG_DIAGNOSTIC refined {initial_svg_path}", flush=True)
 
         if args.optimize_iter > 0:
             report_progress(int(file_start + file_span * 0.72), "Fine-tuning path geometry")

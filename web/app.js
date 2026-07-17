@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { file: null, dataUrl: "", svg: "", svgUrl: "", scale: 1, x: 0, y: 0, split: 50, view: "compare", naturalW: 1, naturalH: 1, cudaAvailable: true, requestId: 0, requestController: null };
+const state = { file: null, dataUrl: "", svg: "", svgUrl: "", diagnostics: {}, scale: 1, x: 0, y: 0, split: 50, view: "compare", naturalW: 1, naturalH: 1, cudaAvailable: true, requestId: 0, requestController: null };
 
 const els = {
   sidebar: $("sidebar"), fileInput: $("fileInput"), dropZone: $("dropZone"), importCard: $("dropZone"),
@@ -24,6 +24,7 @@ function loadFile(file) {
   const reader = new FileReader();
   reader.onload = () => {
     clearSvgPreview();
+    resetDiagnostics();
     state.file = file; state.dataUrl = reader.result; state.svg = "";
     els.input.onload = () => {
       state.naturalW = els.input.naturalWidth; state.naturalH = els.input.naturalHeight;
@@ -41,6 +42,7 @@ function loadFile(file) {
 
 function removeFile() {
   clearSvgPreview();
+  resetDiagnostics();
   state.file = null; state.dataUrl = ""; state.svg = ""; els.fileInput.value = "";
   els.fileChip.classList.add("hidden"); els.importCard.classList.remove("hidden"); els.canvas.classList.add("hidden");
   els.empty.classList.remove("hidden"); els.vectorize.disabled = true; els.download.disabled = true;
@@ -68,6 +70,27 @@ function showSvgPreview(svg) {
     image.src = state.svgUrl;
   });
 }
+
+function showImagePreview(src) {
+  clearSvgPreview();
+  const image = new Image(); image.alt = "Diagnostic preview"; image.src = src;
+  els.svgPreview.replaceChildren(image);
+}
+const diagnosticLabels = { slic: "Coarse SLIC regions", coarse: "Coarse SVG", refined: "Neural refined SVG", final: "Final output" };
+function resetDiagnostics() {
+  state.diagnostics = {}; const select = $("diagnosticSelect");
+  select.innerHTML = '<option value="final">Final output</option>'; select.disabled = true;
+}
+function addDiagnostic(event) {
+  state.diagnostics[event.name] = event; const select = $("diagnosticSelect");
+  if (!select.querySelector(`option[value="${event.name}"]`)) select.add(new Option(diagnosticLabels[event.name] || event.name, event.name));
+  select.disabled = false;
+}
+$("diagnosticSelect").addEventListener("change", async e => {
+  if (e.target.value === "final") { if (state.svg) await showSvgPreview(state.svg); return; }
+  const item = state.diagnostics[e.target.value]; if (!item) return;
+  if (item.kind === "svg") await showSvgPreview(item.data); else showImagePreview(item.data);
+});
 
 function formatBytes(bytes) { return bytes < 1048576 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1048576).toFixed(1)} MB`; }
 function setRange(input, output, formatter = v => v) {
@@ -197,6 +220,7 @@ document.querySelectorAll(".view-tabs button").forEach(b => b.addEventListener("
 els.vectorize.addEventListener("click", vectorize);
 async function vectorize() {
   if (!state.file) return;
+  resetDiagnostics();
   if (state.requestController) state.requestController.abort();
   const requestId = ++state.requestId;
   const controller = new AbortController();
@@ -240,6 +264,10 @@ async function vectorize() {
           $("progressMessage").textContent = event.message;
           appendLog(`[${event.percent}%] ${event.message}`);
         } else if (event.type === "log") appendLog(event.message);
+        else if (event.type === "diagnostic") {
+          addDiagnostic(event);
+          appendLog(`Diagnostic ready: ${diagnosticLabels[event.name] || event.name}`);
+        }
         else if (event.type === "preview") {
           state.svg = event.svg;
           await showSvgPreview(state.svg);
@@ -257,6 +285,7 @@ async function vectorize() {
     }
     if (!result) throw new Error("Vectorization ended without returning an SVG.");
     state.svg = result.svg;
+    state.diagnostics.final = { name: "final", kind: "svg", data: result.svg };
     $("progressMessage").textContent = "Loading SVG preview…";
     appendLog(`SVG received (${Math.round(state.svg.length / 1024).toLocaleString()} KB)`);
     await showSvgPreview(state.svg);
