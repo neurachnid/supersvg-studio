@@ -109,6 +109,8 @@ $("resetButton").addEventListener("click", () => {
   $("device").value = $("device").querySelector('option[value="cuda"]').disabled ? "cpu" : "cuda";
   $("batchSize").value = "64"; $("seed").value = 0;
   $("coarseRegionSize").value = 64; $("coarseMargin").value = 2; $("refineMargin").value = 0; $("workingResolution").value = "512";
+  $("coarseCompactness").value = 50; $("refineCompactness").value = 20; $("slicSigma").value = 5;
+  $("learningRate").value = 0.001; $("pathPenalty").value = 0.000001;
 });
 
 $("collapseButton").addEventListener("click", () => els.sidebar.classList.toggle("collapsed"));
@@ -187,7 +189,9 @@ async function vectorize() {
         optimize_iter: Number(els.optimize.value), refine_paths_per_segment: Number(els.refine.value),
         refine_batch_size: Number($("batchSize").value), seed: Number($("seed").value), device: $("device").value,
         coarse_paths_per_segment: Number($("coarseRegionSize").value), coarse_margin: Number($("coarseMargin").value),
-        refine_margin: Number($("refineMargin").value), working_resolution: Number($("workingResolution").value)
+        refine_margin: Number($("refineMargin").value), working_resolution: Number($("workingResolution").value),
+        coarse_compactness: Number($("coarseCompactness").value), refine_compactness: Number($("refineCompactness").value),
+        slic_sigma: Number($("slicSigma").value), learning_rate: Number($("learningRate").value), path_penalty: Number($("pathPenalty").value)
       })
     });
     if (!response.ok) {

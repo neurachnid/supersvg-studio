@@ -104,6 +104,11 @@ class VectorizeRequest(BaseModel):
     coarse_margin: int = Field(default=2, ge=0, le=32)
     refine_margin: int = Field(default=0, ge=0, le=32)
     working_resolution: int = Field(default=512, ge=256, le=1024)
+    coarse_compactness: float = Field(default=50.0, ge=0.1, le=200.0)
+    refine_compactness: float = Field(default=20.0, ge=0.1, le=200.0)
+    slic_sigma: float = Field(default=5.0, ge=0.0, le=20.0)
+    learning_rate: float = Field(default=0.001, ge=0.00001, le=0.01)
+    path_penalty: float = Field(default=0.000001, ge=0.0, le=0.001)
     seed: int = Field(default=0, ge=0, le=999999)
     device: str = Field(default="cuda", pattern="^(cuda|cpu)$")
 
@@ -204,6 +209,16 @@ def vectorize(payload: VectorizeRequest):
                 str(payload.refine_margin),
                 "--working_resolution",
                 str(payload.working_resolution),
+                "--coarse_compactness",
+                str(payload.coarse_compactness),
+                "--refine_compactness",
+                str(payload.refine_compactness),
+                "--slic_sigma",
+                str(payload.slic_sigma),
+                "--learning_rate",
+                str(payload.learning_rate),
+                "--path_penalty",
+                str(payload.path_penalty),
                 "--seed",
                 str(payload.seed),
             ]

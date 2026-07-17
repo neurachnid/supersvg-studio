@@ -68,6 +68,11 @@ def get_args_parser():
     parser.add_argument("--coarse_margin", type=int, default=2, help="coarse crop margin in render pixels")
     parser.add_argument("--refine_margin", type=int, default=0, help="refine crop margin in render pixels")
     parser.add_argument("--working_resolution", type=int, default=RENDER_WIDTH, help="maximum internal render dimension")
+    parser.add_argument("--coarse_compactness", type=float, default=50.0)
+    parser.add_argument("--refine_compactness", type=float, default=20.0)
+    parser.add_argument("--slic_sigma", type=float, default=5.0)
+    parser.add_argument("--learning_rate", type=float, default=0.001)
+    parser.add_argument("--path_penalty", type=float, default=1e-6)
     return parser
 
 
@@ -180,11 +185,11 @@ def count_active_paths(strokes):
 
 
 @torch.inference_mode()
-def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=2):
+def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=2, compactness=50.0, sigma=5.0):
     model.width = render_size[0]
     model.height = render_size[1]
     image_np = np.array(image.resize(render_size)) / 255.0
-    segments = torch.from_numpy(slic(image_np, n_segments=num_of_segments, sigma=5, compactness=50))
+    segments = torch.from_numpy(slic(image_np, n_segments=num_of_segments, sigma=sigma, compactness=compactness))
     image_tensor = torch.from_numpy(image_np).permute(2, 0, 1)
     _, h, w = image_tensor.size()
 
@@ -240,7 +245,7 @@ def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(REND
     return new_strokes, output
 
 @torch.inference_mode()
-def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, target_path_num, refine_paths_per_segment, refine_batch_size, device, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=0):
+def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, target_path_num, refine_paths_per_segment, refine_batch_size, device, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=0, compactness=20.0, sigma=5.0):
     coarse_strokes = ensure_stroke_dim_28(coarse_strokes)
     coarse_count = int(coarse_strokes.size(1))
     if coarse_count >= target_path_num:
@@ -256,7 +261,7 @@ def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, t
     coarse_model.width = render_size[0]
     coarse_model.height = render_size[1]
     coarse_canvas = coarse_model.rendering(coarse_strokes)[:, :3, :, :]
-    segment_map = slic(image_np, n_segments=num_refine_segments, sigma=5, compactness=20)
+    segment_map = slic(image_np, n_segments=num_refine_segments, sigma=sigma, compactness=compactness)
     max_seg = int(segment_map.max())
     if max_seg <= 0:
         return coarse_strokes
@@ -393,14 +398,14 @@ def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, t
     return final_strokes[:, :target_path_num]
 
 
-def fine_tune(image, strokes, model, device, iters=1000, render_size=(RENDER_WIDTH, RENDER_WIDTH), progress_callback=None):
+def fine_tune(image, strokes, model, device, iters=1000, render_size=(RENDER_WIDTH, RENDER_WIDTH), progress_callback=None, learning_rate=0.001, path_penalty=1e-6):
     target = to_tensor_render(image, render_size).to(device)
     model.width = render_size[0]
     model.height = render_size[1]
     strokes.requires_grad = True
     beta = torch.ones((1, int(strokes.size(1)), 1), device=device) * 0.01
     beta.requires_grad = True
-    optimizer = torch.optim.AdamW([strokes, beta], lr=0.001, betas=(0.9, 0.95))
+    optimizer = torch.optim.AdamW([strokes, beta], lr=learning_rate, betas=(0.9, 0.95))
     for iteration in range(iters + 1):
         new_beta = SignWithSigmoidGrad.apply(beta)
         if strokes.size(-1) == 27:
@@ -412,7 +417,7 @@ def fine_tune(image, strokes, model, device, iters=1000, render_size=(RENDER_WID
         output = model.rendering(pred_strokes)[:, :3, :, :]
         loss_num = new_beta.sum()
         loss_pixel = ((output - target) ** 2).mean()
-        loss = loss_pixel + loss_num * 1e-6
+        loss = loss_pixel + loss_num * path_penalty
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -474,7 +479,7 @@ def main(args):
         coarse_model.width = render_w
         coarse_model.height = render_h
         report_progress(int(file_start + file_span * 0.12), "Building coarse vector paths")
-        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size, margin=args.coarse_margin)
+        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size, margin=args.coarse_margin, compactness=args.coarse_compactness, sigma=args.slic_sigma)
         report_progress(int(file_start + file_span * 0.48), "Refining vector regions")
         final_strokes = global_slic_refine_once(
             image=image,
@@ -487,6 +492,8 @@ def main(args):
             device=device,
             render_size=render_size,
             margin=args.refine_margin,
+            compactness=args.refine_compactness,
+            sigma=args.slic_sigma,
         )
 
         coarse_model.width = render_w
@@ -516,6 +523,8 @@ def main(args):
                     int(tune_start + tune_span * (iteration / max(1, total))),
                     f"Fine-tuning paths ({iteration}/{total})",
                 ),
+                learning_rate=args.learning_rate,
+                path_penalty=args.path_penalty,
             )
 
         report_progress(int(file_start + file_span * 0.88), "Writing SVG output")
