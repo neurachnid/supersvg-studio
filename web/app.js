@@ -108,6 +108,7 @@ $("resetButton").addEventListener("click", () => {
   [els.pathNum, els.refine, els.optimize].forEach(el => el.dispatchEvent(new Event("input")));
   $("device").value = $("device").querySelector('option[value="cuda"]').disabled ? "cpu" : "cuda";
   $("batchSize").value = "64"; $("seed").value = 0;
+  $("coarseRegionSize").value = 64; $("coarseMargin").value = 2; $("refineMargin").value = 0; $("workingResolution").value = "512";
 });
 
 $("collapseButton").addEventListener("click", () => els.sidebar.classList.toggle("collapsed"));
@@ -184,7 +185,9 @@ async function vectorize() {
       body: JSON.stringify({
         image: state.dataUrl, mime_type: state.file.type, path_num: Number(els.pathNum.value),
         optimize_iter: Number(els.optimize.value), refine_paths_per_segment: Number(els.refine.value),
-        refine_batch_size: Number($("batchSize").value), seed: Number($("seed").value), device: $("device").value
+        refine_batch_size: Number($("batchSize").value), seed: Number($("seed").value), device: $("device").value,
+        coarse_paths_per_segment: Number($("coarseRegionSize").value), coarse_margin: Number($("coarseMargin").value),
+        refine_margin: Number($("refineMargin").value), working_resolution: Number($("workingResolution").value)
       })
     });
     if (!response.ok) {

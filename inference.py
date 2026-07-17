@@ -31,9 +31,9 @@ HF_WEIGHTS_PREFIX = "weights"
 resize_224 = transforms.Resize([PATCH_SIZE, PATCH_SIZE])
 
 
-def compute_render_size(image: Image.Image):
+def compute_render_size(image: Image.Image, working_resolution=RENDER_WIDTH):
     src_w, src_h = image.size
-    scale = min(1.0, RENDER_WIDTH / max(src_w, src_h))
+    scale = min(1.0, working_resolution / max(src_w, src_h))
     render_w = max(1, int(round(src_w * scale)))
     render_h = max(1, int(round(src_h * scale)))
     return render_w, render_h
@@ -64,6 +64,10 @@ def get_args_parser():
     parser.add_argument("--hf_repo_id", type=str, default=HF_REPO_ID_DEFAULT, help="Hugging Face repo id for auto-downloading weights")
     parser.add_argument("--refine_paths_per_segment", type=int, default=8, help="estimated refine paths per superpixel")
     parser.add_argument("--refine_batch_size", type=int, default=PREDICT_BATCH_SIZE, help="batch size for refine")
+    parser.add_argument("--coarse_paths_per_segment", type=int, default=PATHS_PER_SEGMENT_FOR_SEGMENT_ESTIMATE, help="target paths represented by each coarse SLIC region")
+    parser.add_argument("--coarse_margin", type=int, default=2, help="coarse crop margin in render pixels")
+    parser.add_argument("--refine_margin", type=int, default=0, help="refine crop margin in render pixels")
+    parser.add_argument("--working_resolution", type=int, default=RENDER_WIDTH, help="maximum internal render dimension")
     return parser
 
 
@@ -152,10 +156,12 @@ def maybe_load_checkpoint(model: RefineModel, ckpt_path: Path, device: torch.dev
     model.load_state_dict(state_dict, strict=False)
 
 
-def get_segment_num_from_path_num(path_num):
+def get_segment_num_from_path_num(path_num, paths_per_segment=PATHS_PER_SEGMENT_FOR_SEGMENT_ESTIMATE):
     if path_num <= 0:
         raise ValueError(f"path_num must be > 0, got {path_num}")
-    return max(1, int(path_num // PATHS_PER_SEGMENT_FOR_SEGMENT_ESTIMATE))
+    if paths_per_segment <= 0:
+        raise ValueError(f"paths_per_segment must be > 0, got {paths_per_segment}")
+    return max(1, int(path_num // paths_per_segment))
 
 
 def ensure_stroke_dim_28(strokes):
@@ -174,7 +180,7 @@ def count_active_paths(strokes):
 
 
 @torch.inference_mode()
-def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(RENDER_WIDTH, RENDER_WIDTH)):
+def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=2):
     model.width = render_size[0]
     model.height = render_size[1]
     image_np = np.array(image.resize(render_size)) / 255.0
@@ -185,7 +191,8 @@ def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(REND
     crops = []
     masks = []
     coords = []
-    kernel = np.ones((4, 4), np.uint8)
+    kernel_size = max(1, 2 * int(margin) + 1)
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
     for seg_id in range(1, int(segments.max()) + 1):
         seg_mask = (segments == seg_id).numpy().astype("uint8")
         seg_mask_dilate = cv2.dilate(seg_mask, kernel, iterations=1)
@@ -233,7 +240,7 @@ def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(REND
     return new_strokes, output
 
 @torch.inference_mode()
-def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, target_path_num, refine_paths_per_segment, refine_batch_size, device, render_size=(RENDER_WIDTH, RENDER_WIDTH)):
+def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, target_path_num, refine_paths_per_segment, refine_batch_size, device, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=0):
     coarse_strokes = ensure_stroke_dim_28(coarse_strokes)
     coarse_count = int(coarse_strokes.size(1))
     if coarse_count >= target_path_num:
@@ -261,7 +268,12 @@ def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, t
         seg_mask_np = (segment_map == seg_id).astype(np.float32)
         if int(seg_mask_np.sum()) == 0:
             continue
-        idxs = np.argwhere(seg_mask_np > 0)
+        if margin > 0:
+            kernel = np.ones((2 * int(margin) + 1, 2 * int(margin) + 1), np.uint8)
+            bbox_mask = cv2.dilate(seg_mask_np.astype(np.uint8), kernel, iterations=1)
+        else:
+            bbox_mask = seg_mask_np
+        idxs = np.argwhere(bbox_mask > 0)
         if idxs.size == 0:
             continue
         x1 = int(idxs[:, 0].min())
@@ -429,7 +441,7 @@ def main(args):
     ckpt_path = get_ckpt_path(args.ckpt_dir, args.hf_repo_id)
     refine_ckpt_path = get_refine_ckpt_path(args.ckpt_dir, args.hf_repo_id)
     files = collect_input_files(args.input_path)
-    num_of_segments = get_segment_num_from_path_num(args.path_num)
+    num_of_segments = get_segment_num_from_path_num(args.path_num, args.coarse_paths_per_segment)
 
     report_progress(8, "Loading coarse model")
     coarse_model = AttnPainterSVG(stroke_num=128, path_num=4, width=MODEL_WIDTH, control_num=False, num_loss=True)
@@ -456,13 +468,13 @@ def main(args):
         file_span = 78 / len(files)
         report_progress(file_start, f"Preparing {image_path.name}")
         image = Image.open(str(image_path)).convert("RGB")
-        render_w, render_h = compute_render_size(image)
+        render_w, render_h = compute_render_size(image, args.working_resolution)
         render_size = (render_w, render_h)
 
         coarse_model.width = render_w
         coarse_model.height = render_h
         report_progress(int(file_start + file_span * 0.12), "Building coarse vector paths")
-        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size)
+        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size, margin=args.coarse_margin)
         report_progress(int(file_start + file_span * 0.48), "Refining vector regions")
         final_strokes = global_slic_refine_once(
             image=image,
@@ -474,6 +486,7 @@ def main(args):
             refine_batch_size=args.refine_batch_size,
             device=device,
             render_size=render_size,
+            margin=args.refine_margin,
         )
 
         coarse_model.width = render_w

@@ -67,6 +67,10 @@
               <label>Device<select id="device"><option value="cuda">CUDA</option><option value="cpu">CPU</option></select></label>
               <label>Batch size<select id="batchSize"><option>32</option><option selected>64</option><option>128</option></select></label>
               <label>Seed<input id="seed" type="number" min="0" value="0" /></label>
+              <label>Coarse region size<input id="coarseRegionSize" type="number" min="16" max="256" step="8" value="64" title="Target paths per initial superpixel; lower values create more regions" /></label>
+              <label>Coarse margin<input id="coarseMargin" type="number" min="0" max="32" value="2" title="Crop margin in render pixels" /></label>
+              <label>Refine margin<input id="refineMargin" type="number" min="0" max="32" value="0" title="Refinement crop margin in render pixels" /></label>
+              <label>Resolution<select id="workingResolution"><option>256</option><option selected>512</option><option>768</option><option>1024</option></select></label>
             </div>
           </details>
         </div>

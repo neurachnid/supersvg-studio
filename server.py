@@ -100,6 +100,10 @@ class VectorizeRequest(BaseModel):
     optimize_iter: int = Field(default=0, ge=0, le=100)
     refine_paths_per_segment: int = Field(default=8, ge=1, le=32)
     refine_batch_size: int = Field(default=64, ge=1, le=128)
+    coarse_paths_per_segment: int = Field(default=64, ge=16, le=256)
+    coarse_margin: int = Field(default=2, ge=0, le=32)
+    refine_margin: int = Field(default=0, ge=0, le=32)
+    working_resolution: int = Field(default=512, ge=256, le=1024)
     seed: int = Field(default=0, ge=0, le=999999)
     device: str = Field(default="cuda", pattern="^(cuda|cpu)$")
 
@@ -192,6 +196,14 @@ def vectorize(payload: VectorizeRequest):
                 str(payload.refine_paths_per_segment),
                 "--refine_batch_size",
                 str(payload.refine_batch_size),
+                "--coarse_paths_per_segment",
+                str(payload.coarse_paths_per_segment),
+                "--coarse_margin",
+                str(payload.coarse_margin),
+                "--refine_margin",
+                str(payload.refine_margin),
+                "--working_resolution",
+                str(payload.working_resolution),
                 "--seed",
                 str(payload.seed),
             ]
