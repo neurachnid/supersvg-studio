@@ -37,6 +37,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     SUPERSVG_RELOAD=0 \
     SUPERSVG_REQUIRE_CUDA=1 \
     SUPERSVG_CKPT_DIR=/opt/supersvg-weights \
+    SUPERSVG_DINO_CKPT=/opt/supersvg-weights/dino_deitsmall16_pretrain.pth \
     HF_HOME=/data/huggingface \
     MPLCONFIGDIR=/tmp/supersvg-matplotlib \
     SUPERSVG_MIN_FREE_GB=2
@@ -58,6 +59,7 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir -r /tmp/requir
 # first request without an additional model download.
 RUN mkdir -p /opt/supersvg-weights \
     && python3 -c "import shutil; from huggingface_hub import hf_hub_download; [(shutil.copy2(hf_hub_download(repo_id='JTUplayer/SuperSVG', filename='weights/'+name), '/opt/supersvg-weights/'+name)) for name in ('coarse.pt','refine.pt')]" \
+    && python3 -c "import hashlib, pathlib, urllib.request; p=pathlib.Path('/opt/supersvg-weights/dino_deitsmall16_pretrain.pth'); urllib.request.urlretrieve('https://dl.fbaipublicfiles.com/dino/dino_deitsmall16_pretrain/dino_deitsmall16_pretrain.pth', p); assert hashlib.sha256(p.read_bytes()).hexdigest() == '1566d50496f27f52f07fea6094fa29b2fdd6fae89da65bdd3ebc3b24ef6b7eb7'" \
     && rm -rf /root/.cache/huggingface
 
 COPY --from=diffvg-builder /wheels /tmp/wheels

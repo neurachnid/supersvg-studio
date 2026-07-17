@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 from collections import OrderedDict
@@ -10,7 +11,12 @@ from torchvision import models
 from util.utils import SignWithSigmoidGrad
 
 #32,64,128, vit pretrain=True,num_loss=False
-DINO_CKPT_PATH = Path(__file__).resolve().parents[1] / "weights" / "dino_deitsmall16_pretrain.pth"
+DINO_CKPT_PATH = Path(
+    os.environ.get(
+        "SUPERSVG_DINO_CKPT",
+        Path(__file__).resolve().parents[1] / "weights" / "dino_deitsmall16_pretrain.pth",
+    )
+)
 
 class StrokeConvHeadBlock(nn.Module):
     def __init__(self, stroke_num, stroke_dim):
