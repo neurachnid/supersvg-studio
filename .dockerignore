@@ -1,0 +1,36 @@
+.git
+.gitignore
+.agents
+.codex
+.vscode
+.idea
+__pycache__
+*.py[cod]
+*.so
+*.dylib
+*.dll
+*.pyd
+*.log
+
+# Checkpoints download once into the runtime HF cache or a /data volume.
+weights
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Generated and test artifacts never belong in the image context.
+output
+output_ratio_check
+test_matrix
+test_images
+.googleadslogo.png
+
+# Native build trees are rebuilt in the builder stage.
+diffvg/build
+diffvg/dist
+diffvg/*.egg-info
+diffvg/apps
+
+tmp
+temp

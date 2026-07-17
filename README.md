@@ -1,3 +1,15 @@
+---
+title: SuperSVG Studio
+emoji: ✒️
+colorFrom: green
+colorTo: gray
+sdk: docker
+app_port: 7860
+fullWidth: true
+header: mini
+short_description: GPU-accelerated raster-to-SVG vectorization studio
+---
+
 # SuperSVG: Superpixel-based Scalable Vector Graphics Synthesis
 
 ### [Paper](https://openaccess.thecvf.com/content/CVPR2024/papers/Hu_SuperSVG_Superpixel-based_Scalable_Vector_Graphics_Synthesis_CVPR_2024_paper.pdf) | [Suppl](https://openaccess.thecvf.com/content/CVPR2024/supplemental/Hu_SuperSVG_Superpixel-based_Scalable_CVPR_2024_supplemental.pdf)
@@ -114,6 +126,58 @@ python inference.py \
   --path_num 1000 \
   --optimize_iter 10
 ```
+
+## Web interface
+
+Start the compact browser UI from the repository root:
+
+```bash
+python server.py
+```
+
+Then open `http://localhost:8000`. The interface supports drag-and-drop image
+import, vectorization settings, input/SVG wipe comparison, zoom, pan, and SVG
+export. FastAPI and Uvicorn must be installed in the active environment.
+
+## Docker GPU deployment
+
+The Docker image is GPU-only. It uses CUDA 12.1, CUDA-enabled PyTorch, and a
+CUDA build of diffvg. It listens on the platform's `PORT` environment variable
+(default `7860`) and fails at startup when no NVIDIA GPU is available.
+
+```bash
+docker build -t supersvg .
+docker run --rm --gpus all -p 8000:7860 -v supersvg-data:/data supersvg
+```
+
+Or use Compose:
+
+```bash
+docker compose up --build
+```
+
+Open `http://localhost:8000`. The image deliberately excludes the 900 MB local
+`weights/` directory. Required checkpoints are downloaded once from Hugging
+Face into `/data/huggingface`; mount `/data` as persistent storage to reuse them
+across container restarts. Per-request inputs and outputs use automatically
+deleted temporary directories.
+
+The server refuses new vectorization jobs when either its cache filesystem or
+temporary filesystem has less than 2 GB free. Override this threshold with
+`SUPERSVG_MIN_FREE_GB` if the deployment has a different storage policy.
+
+### Platform notes
+
+- **Hugging Face Spaces:** choose the Docker SDK and GPU hardware. The exposed
+  port is `7860`. Persistent `/data` storage is optional but prevents checkpoint
+  downloads after restarts.
+- **Google Cloud:** deploy to a GPU-enabled Cloud Run service or GKE node. The
+  platform supplies `PORT`; configure one NVIDIA GPU for the container.
+- **AWS:** use ECS/EKS on an NVIDIA GPU instance and expose container port
+  `7860`. App Runner does not provide GPU instances. Attach persistent storage
+  at `/data` when checkpoint reuse is desired.
+
+Local Docker requires the NVIDIA Container Toolkit and a working `nvidia-smi`.
 
 ### Important Arguments
 

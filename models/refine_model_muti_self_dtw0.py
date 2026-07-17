@@ -10,7 +10,7 @@ import random
 channel_mean = torch.tensor([0.485, 0.456, 0.406])
 channel_std = torch.tensor([0.229, 0.224, 0.225])
 pydiffvg.set_print_timing(False)
-pydiffvg.set_use_gpu(True)
+pydiffvg.set_use_gpu(torch.cuda.is_available())
 MEAN = [-mean / std for mean, std in zip(channel_mean, channel_std)]
 STD = [1 / std for std in channel_std]
 torch.multiprocessing.set_start_method('spawn', force=True)

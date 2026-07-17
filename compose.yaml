@@ -1,0 +1,17 @@
+services:
+  supersvg:
+    build: .
+    ports:
+      - "7860:7860"
+    environment:
+      PORT: "7860"
+      SUPERSVG_RELOAD: "0"
+      SUPERSVG_REQUIRE_CUDA: "1"
+      SUPERSVG_MIN_FREE_GB: "2"
+    gpus: all
+    volumes:
+      - supersvg-data:/data
+    restart: unless-stopped
+
+volumes:
+  supersvg-data:

@@ -1,5 +1,6 @@
 import argparse
 import math
+import os
 import time
 from pathlib import Path
 
@@ -28,8 +29,22 @@ HF_REPO_ID_DEFAULT = "JTUplayer/SuperSVG"
 HF_WEIGHTS_PREFIX = "weights"
 
 resize_224 = transforms.Resize([PATCH_SIZE, PATCH_SIZE])
-resize_512 = transforms.Resize([RENDER_WIDTH, RENDER_WIDTH])
-to_tensor_512 = transforms.Compose([transforms.ToTensor(), transforms.Resize([RENDER_WIDTH, RENDER_WIDTH])])
+
+
+def compute_render_size(image: Image.Image):
+    src_w, src_h = image.size
+    scale = min(1.0, RENDER_WIDTH / max(src_w, src_h))
+    render_w = max(1, int(round(src_w * scale)))
+    render_h = max(1, int(round(src_h * scale)))
+    return render_w, render_h
+
+
+def resize_to_render(image: Image.Image, render_size):
+    return transforms.Resize((render_size[1], render_size[0]))(image)
+
+
+def to_tensor_render(image: Image.Image, render_size):
+    return transforms.Compose([transforms.ToTensor(), transforms.Resize((render_size[1], render_size[0]))])(image)
 
 
 def get_args_parser():
@@ -40,7 +55,12 @@ def get_args_parser():
     parser.add_argument("--input_path", type=str, default="test_images", help="path to image file or image folder")
     parser.add_argument("--path_num", type=int, default=1000, help="target SVG path count")
     parser.add_argument("--optimize_iter", type=int, default=0, help="fine-tuning iterations after rendering")
-    parser.add_argument("--ckpt_dir", type=str, default="weights", help="checkpoint directory")
+    parser.add_argument(
+        "--ckpt_dir",
+        type=str,
+        default=os.environ.get("SUPERSVG_CKPT_DIR", "weights"),
+        help="checkpoint directory",
+    )
     parser.add_argument("--hf_repo_id", type=str, default=HF_REPO_ID_DEFAULT, help="Hugging Face repo id for auto-downloading weights")
     parser.add_argument("--refine_paths_per_segment", type=int, default=8, help="estimated refine paths per superpixel")
     parser.add_argument("--refine_batch_size", type=int, default=PREDICT_BATCH_SIZE, help="batch size for refine")
@@ -87,8 +107,11 @@ def get_ckpt_path(ckpt_dir, hf_repo_id):
     return _download_weight_from_hf("coarse.pt", hf_repo_id)
 
 
-def get_refine_ckpt_path(hf_repo_id):
-    ckpt_path = Path(__file__).resolve().parent / "weights" / "refine.pt"
+def get_refine_ckpt_path(ckpt_dir, hf_repo_id):
+    ckpt_dir_path = Path(ckpt_dir)
+    if not ckpt_dir_path.is_absolute():
+        ckpt_dir_path = (Path(__file__).resolve().parent / ckpt_dir_path).resolve()
+    ckpt_path = ckpt_dir_path / "refine.pt"
     if ckpt_path.exists():
         return ckpt_path
     print(f"[weights] Local refine checkpoint not found: {ckpt_path}. Downloading from {hf_repo_id} ...")
@@ -150,10 +173,11 @@ def count_active_paths(strokes):
     return int(strokes.size(1))
 
 
-@torch.no_grad()
-def decode_by_id_map(image, model, device, num_of_segments=32):
-    model.width = RENDER_WIDTH
-    image_np = np.array(image.resize((RENDER_WIDTH, RENDER_WIDTH))) / 255.0
+@torch.inference_mode()
+def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(RENDER_WIDTH, RENDER_WIDTH)):
+    model.width = render_size[0]
+    model.height = render_size[1]
+    image_np = np.array(image.resize(render_size)) / 255.0
     segments = torch.from_numpy(slic(image_np, n_segments=num_of_segments, sigma=5, compactness=50))
     image_tensor = torch.from_numpy(image_np).permute(2, 0, 1)
     _, h, w = image_tensor.size()
@@ -206,11 +230,10 @@ def decode_by_id_map(image, model, device, num_of_segments=32):
         raise RuntimeError("No visible strokes predicted; try reducing path_num.")
     new_strokes = torch.stack(visible_strokes, dim=0).unsqueeze(0)
     output = model.rendering(new_strokes)[:, :3, :, :]
-    return new_strokes, resize_512(output)
+    return new_strokes, output
 
-
-@torch.no_grad()
-def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, target_path_num, refine_paths_per_segment, refine_batch_size, device):
+@torch.inference_mode()
+def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, target_path_num, refine_paths_per_segment, refine_batch_size, device, render_size=(RENDER_WIDTH, RENDER_WIDTH)):
     coarse_strokes = ensure_stroke_dim_28(coarse_strokes)
     coarse_count = int(coarse_strokes.size(1))
     if coarse_count >= target_path_num:
@@ -219,11 +242,12 @@ def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, t
     remaining_paths = target_path_num - coarse_count
     num_refine_segments = max(1, int(math.ceil(remaining_paths / max(1, refine_paths_per_segment))))
 
-    image_np = np.array(image.resize((RENDER_WIDTH, RENDER_WIDTH))) / 255.0
+    image_np = np.array(image.resize(render_size)) / 255.0
     image_tensor = torch.from_numpy(image_np).permute(2, 0, 1).to(device).float()
     _, h, w = image_tensor.shape
 
-    coarse_model.width = RENDER_WIDTH
+    coarse_model.width = render_size[0]
+    coarse_model.height = render_size[1]
     coarse_canvas = coarse_model.rendering(coarse_strokes)[:, :3, :, :]
     segment_map = slic(image_np, n_segments=num_refine_segments, sigma=5, compactness=20)
     max_seg = int(segment_map.max())
@@ -298,7 +322,8 @@ def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, t
             tmp_strokes = torch.cat([coarse_strokes, tmp_new_strokes], dim=1)
         else:
             tmp_strokes = coarse_strokes
-        coarse_model.width = RENDER_WIDTH
+        coarse_model.width = render_size[0]
+        coarse_model.height = render_size[1]
         tmp_canvas = coarse_model.rendering(tmp_strokes)[:, :3, :, :]
         mse_map = ((tmp_canvas[0] - image_tensor) ** 2).mean(dim=0)
 
@@ -356,14 +381,15 @@ def global_slic_refine_once(image, coarse_strokes, coarse_model, refine_model, t
     return final_strokes[:, :target_path_num]
 
 
-def fine_tune(image, strokes, model, device, iters=1000):
-    target = to_tensor_512(image).to(device)
-    model.width = RENDER_WIDTH
+def fine_tune(image, strokes, model, device, iters=1000, render_size=(RENDER_WIDTH, RENDER_WIDTH), progress_callback=None):
+    target = to_tensor_render(image, render_size).to(device)
+    model.width = render_size[0]
+    model.height = render_size[1]
     strokes.requires_grad = True
     beta = torch.ones((1, int(strokes.size(1)), 1), device=device) * 0.01
     beta.requires_grad = True
     optimizer = torch.optim.AdamW([strokes, beta], lr=0.001, betas=(0.9, 0.95))
-    for _ in range(iters + 1):
+    for iteration in range(iters + 1):
         new_beta = SignWithSigmoidGrad.apply(beta)
         if strokes.size(-1) == 27:
             pred_strokes = torch.cat([strokes, new_beta], dim=-1)
@@ -378,10 +404,15 @@ def fine_tune(image, strokes, model, device, iters=1000):
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
+        if progress_callback is not None and (iteration == iters or iteration % max(1, iters // 10) == 0):
+            progress_callback(iteration, iters)
     return pred_strokes.detach(), output, loss_pixel
 
 
 def main(args):
+    def report_progress(percent, message):
+        print(f"SUPERSVG_PROGRESS {percent} {message}", flush=True)
+
     print(f"job dir: {Path(__file__).resolve().parent}")
     print("{}".format(args).replace(", ", ",\n"))
 
@@ -394,18 +425,23 @@ def main(args):
     np.random.seed(args.seed)
     cudnn.benchmark = True
 
+    report_progress(3, "Checking model weights")
     ckpt_path = get_ckpt_path(args.ckpt_dir, args.hf_repo_id)
-    refine_ckpt_path = get_refine_ckpt_path(args.hf_repo_id)
+    refine_ckpt_path = get_refine_ckpt_path(args.ckpt_dir, args.hf_repo_id)
     files = collect_input_files(args.input_path)
     num_of_segments = get_segment_num_from_path_num(args.path_num)
 
+    report_progress(8, "Loading coarse model")
     coarse_model = AttnPainterSVG(stroke_num=128, path_num=4, width=MODEL_WIDTH, control_num=False, num_loss=True)
     coarse_model.load_state_dict(torch.load(str(ckpt_path), map_location=device))
     coarse_model.to(device)
     coarse_model.eval()
+    coarse_model.requires_grad_(False)
 
+    report_progress(14, "Loading refinement model")
     refine_model = build_refine_model(width=REFINE_WIDTH, device=device)
     maybe_load_checkpoint(refine_model, refine_ckpt_path, device)
+    refine_model.requires_grad_(False)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -416,8 +452,18 @@ def main(args):
     average_mse = 0.0
 
     for idx, image_path in enumerate(files):
+        file_start = 18 + int((idx / len(files)) * 78)
+        file_span = 78 / len(files)
+        report_progress(file_start, f"Preparing {image_path.name}")
         image = Image.open(str(image_path)).convert("RGB")
-        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments)
+        render_w, render_h = compute_render_size(image)
+        render_size = (render_w, render_h)
+
+        coarse_model.width = render_w
+        coarse_model.height = render_h
+        report_progress(int(file_start + file_span * 0.12), "Building coarse vector paths")
+        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size)
+        report_progress(int(file_start + file_span * 0.48), "Refining vector regions")
         final_strokes = global_slic_refine_once(
             image=image,
             coarse_strokes=coarse_strokes,
@@ -427,15 +473,40 @@ def main(args):
             refine_paths_per_segment=args.refine_paths_per_segment,
             refine_batch_size=args.refine_batch_size,
             device=device,
+            render_size=render_size,
         )
 
-        coarse_model.width = RENDER_WIDTH
-        output = coarse_model.rendering(final_strokes)[:, :3, :, :]
-        output = resize_512(output)
-        if args.optimize_iter > 0:
-            final_strokes, output, _ = fine_tune(image, final_strokes, coarse_model, device, args.optimize_iter)
+        coarse_model.width = render_w
+        coarse_model.height = render_h
+        with torch.inference_mode():
+            output = coarse_model.rendering(final_strokes)[:, :3, :, :]
 
-        target = to_tensor_512(image).unsqueeze(0).to(device)
+        initial_svg_path = output_dir / f"{image_path.stem}.initial.svg"
+        coarse_model.rendering(final_strokes, save_svg_path=str(initial_svg_path))
+        print(f"SUPERSVG_PREVIEW {initial_svg_path}", flush=True)
+
+        if args.optimize_iter > 0:
+            report_progress(int(file_start + file_span * 0.72), "Fine-tuning path geometry")
+            # Tensors created in inference mode cannot be marked for gradients.
+            # A regular clone preserves values while enabling the optimization pass.
+            final_strokes = torch.tensor(final_strokes.detach().cpu().numpy(), device=device)
+            tune_start = file_start + file_span * 0.72
+            tune_span = file_span * 0.16
+            final_strokes, output, _ = fine_tune(
+                image,
+                final_strokes,
+                coarse_model,
+                device,
+                args.optimize_iter,
+                render_size=render_size,
+                progress_callback=lambda iteration, total: report_progress(
+                    int(tune_start + tune_span * (iteration / max(1, total))),
+                    f"Fine-tuning paths ({iteration}/{total})",
+                ),
+            )
+
+        report_progress(int(file_start + file_span * 0.88), "Writing SVG output")
+        target = to_tensor_render(image, render_size).unsqueeze(0).to(device)
         mse_loss = ((output - target) ** 2).mean()
         average_mse += float(mse_loss)
         print(idx, mse_loss.item(), f"final_path_count={count_active_paths(final_strokes)}")
@@ -443,11 +514,11 @@ def main(args):
         output_png_path = output_dir / image_path.name
         output_svg_path = output_dir / f"{image_path.stem}.svg"
         save_image(output, str(output_png_path), normalize=False)
-        coarse_model.width = RENDER_WIDTH
         coarse_model.rendering(final_strokes, save_svg_path=str(output_svg_path))
 
     print(average_mse / len(files))
     print(f"Rendering time {time.time() - start_time:.2f}s")
+    report_progress(100, "Vectorization complete")
 
 
 if __name__ == "__main__":

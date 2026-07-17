@@ -18,22 +18,23 @@ from torchvision.utils import save_image
 channel_mean = torch.tensor([0.485, 0.456, 0.406])
 channel_std = torch.tensor([0.229, 0.224, 0.225])
 pydiffvg.set_print_timing(False)
-pydiffvg.set_use_gpu(True)
+pydiffvg.set_use_gpu(torch.cuda.is_available())
 MEAN = [-mean / std for mean, std in zip(channel_mean, channel_std)]
 STD = [1 / std for std in channel_std]
 torch.multiprocessing.set_start_method('spawn', force=True)
 
 
 class AttnPainterSVG(nn.Module):
-    def __init__(self, stroke_num=128, path_num=4, width=128,control_num=False,self_attn_depth=1,num_loss=False):
+    def __init__(self, stroke_num=128, path_num=4, width=128, height=None, control_num=False, self_attn_depth=1, num_loss=False):
         super(AttnPainterSVG, self).__init__()
         self.control_num=control_num
         self.path_num = path_num
         self.encoder = StrokeAttentionPredictor(stroke_num=stroke_num, stroke_dim=path_num * 6 + 3,control_num=control_num,self_attn_depth=self_attn_depth,num_loss=num_loss)
         self.stroke_num = stroke_num
-        self.device = 'cuda'
-        self.render = SVR_render.SVGObject(size=(width, width))
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.width = width
+        self.height = width if height is None else height
+        self.render = SVR_render.SVGObject(size=(self.height, self.width))
         self.loss_fn_vgg = None
 
     def forward(self, x,mask=None, num=None,**kwargs):
@@ -68,21 +69,27 @@ class AttnPainterSVG(nn.Module):
         groups = []
         for num in range(len(strokes)):
             num_control_points = [2] * (len(strokes[num][:-3])//6)
+            # Clone before scaling: this slice is otherwise a view into `strokes`,
+            # and in-place multiplication corrupts normalized coordinates for
+            # subsequent renders (notably the SVG save pass).
+            points = strokes[num][:-3].reshape(-1, 2).clone()
+            points[:, 0] = points[:, 0] * self.width
+            points[:, 1] = points[:, 1] * self.height
             shapes.append(
                 pydiffvg.Path(
                     num_control_points=torch.LongTensor(num_control_points),
-                    points=strokes[num][:-3].reshape(-1, 2) * self.width,
+                    points=points,
                     stroke_width=torch.tensor(0.0),
                     is_closed=True))
             groups.append(
                 pydiffvg.ShapeGroup(
                     shape_ids=torch.LongTensor([num]),
                     fill_color=torch.cat([strokes[num][-3:], torch.ones(1).cuda()], dim=0)))
-        scene_args = pydiffvg.RenderFunction.serialize_scene(self.width, self.width, shapes, groups)
+        scene_args = pydiffvg.RenderFunction.serialize_scene(self.width, self.height, shapes, groups)
         _render = pydiffvg.RenderFunction.apply
-        img = _render(self.width, self.width, 2, 2, 0, None, *scene_args)
+        img = _render(self.width, self.height, 2, 2, 0, None, *scene_args)
         if save_svg_path is not None:
-            pydiffvg.save_svg(save_svg_path, self.width, self.width, shapes, groups)
+            pydiffvg.save_svg(save_svg_path, self.width, self.height, shapes, groups)
         if result_queue is not None:
             result_queue.put((idx, img))
         return img.permute(2, 0, 1)
@@ -97,23 +104,27 @@ class AttnPainterSVG(nn.Module):
             shapes = []
             groups = []
             for num in range(strokes.size(1)):
+                # Keep the source strokes normalized across repeated renders.
+                points = strokes[b][num][:-4].reshape(-1, 2).clone()
+                points[:, 0] = points[:, 0] * self.width
+                points[:, 1] = points[:, 1] * self.height
                 shapes.append(
                     pydiffvg.Path(
                         num_control_points=torch.LongTensor(num_control_points),
-                        points=strokes[b][num][:-4].reshape(-1, 2) * self.width,
+                        points=points,
                         stroke_width=torch.tensor(0.0),
                         is_closed=True))
                 groups.append(
                     pydiffvg.ShapeGroup(
                         shape_ids=torch.LongTensor([num]),
                         fill_color=strokes[b][num][-4:]))
-            scene_args = pydiffvg.RenderFunction.serialize_scene(self.width, self.width, shapes, groups)
+            scene_args = pydiffvg.RenderFunction.serialize_scene(self.width, self.height, shapes, groups)
             _render = pydiffvg.RenderFunction.apply
-            img = _render(self.width, self.width, 2, 2, 0, None, *scene_args)
+            img = _render(self.width, self.height, 2, 2, 0, None, *scene_args)
             imgs.append(img.permute(2, 0, 1))
         imgs = torch.stack(imgs, dim=0)
         if save_svg_path is not None:
-            pydiffvg.save_svg(save_svg_path, self.width, self.width, shapes, groups)
+            pydiffvg.save_svg(save_svg_path, self.width, self.height, shapes, groups)
         return imgs
     def rendering_batch_one_time(self, strokes,save_svg_path=None):  # Render batched paths on one canvas, then split.
         block_width=6

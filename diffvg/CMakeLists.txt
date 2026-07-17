@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.12)
 
 project(diffvg VERSION 0.0.1 DESCRIPTION "Differentiable Vector Graphics")
 
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -10,7 +12,7 @@ if(WIN32)
 else()
     find_package(Python 3.7 COMPONENTS Development REQUIRED)
 endif()
-add_subdirectory(pybind11)
+find_package(pybind11 CONFIG REQUIRED)
 
 option(DIFFVG_CUDA "Build diffvg with GPU code path?" ON)
 
@@ -33,7 +35,7 @@ include_directories(${PYTHON_INCLUDE_PATH})
 find_package(PythonLibs REQUIRED)
 include_directories(${PYTHON_INCLUDE_PATH})
 include_directories(${PYTHON_INCLUDE_DIRS})
-include_directories(pybind11/include)
+include_directories(${pybind11_INCLUDE_DIRS})
 if(DIFFVG_CUDA)
     link_directories(${CUDA_LIBRARIES})
 else()
@@ -103,9 +105,9 @@ endif()
 
 target_link_libraries(diffvg ${DYNAMIC_LOOKUP})
 
+# Use the external pybind11 module target for both Windows and Linux builds.
+target_link_libraries(diffvg pybind11::module)
 if(WIN32)
-    # See: https://pybind11.readthedocs.io/en/master/compiling.html#advanced-interface-library-target
-    target_link_libraries(diffvg pybind11::module)
     set_target_properties(diffvg PROPERTIES PREFIX "${PYTHON_MODULE_PREFIX}"
                                             SUFFIX "${PYTHON_MODULE_EXTENSION}")
 endif()
@@ -118,7 +120,7 @@ elseif(APPLE)
     set_target_properties(diffvg PROPERTIES INSTALL_RPATH "@loader_path")
 endif()
 
-set_property(TARGET diffvg PROPERTY CXX_STANDARD 11)
+set_property(TARGET diffvg PROPERTY CXX_STANDARD 14)
 set_target_properties(diffvg PROPERTIES PREFIX "")
 # Still enable assertion in release mode
 string( REPLACE "/DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")

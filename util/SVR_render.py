@@ -17,7 +17,7 @@ import time
 from tqdm import tqdm
 
 pydiffvg.set_print_timing(False)
-pydiffvg.set_use_gpu(True)
+pydiffvg.set_use_gpu(torch.cuda.is_available())
 gamma = 1.0
 
 
