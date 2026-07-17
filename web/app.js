@@ -76,7 +76,7 @@ function showImagePreview(src) {
   const image = new Image(); image.alt = "Diagnostic preview"; image.src = src;
   els.svgPreview.replaceChildren(image);
 }
-const diagnosticLabels = { slic: "Coarse SLIC regions", coarse: "Coarse SVG", refined: "Neural refined SVG", final: "Final output" };
+const diagnosticLabels = { slic: "Coarse SLIC regions", crops: "Coarse model crops", coarse: "Coarse SVG", refined: "Neural refined SVG", final: "Final output" };
 function resetDiagnostics() {
   state.diagnostics = {}; const select = $("diagnosticSelect");
   select.innerHTML = '<option value="final">Final output</option>'; select.disabled = true;
@@ -135,6 +135,7 @@ const settingHelp = {
   seed: ["Seed", "Controls deterministic initialization. Different values may produce slightly different paths; it is not a quality scale."],
   coarseRegionSize: ["Coarse region size", "Target paths represented by each initial superpixel. Low: more, smaller coarse regions. High: fewer, larger regions and faster processing."],
   coarseMargin: ["Coarse margin", "Extra render pixels around coarse crops. Low: paths stay close to region boundaries. High: paths can cross farther, reducing seams but increasing overlap."],
+  coarseContext: ["Context strength", "Neighboring RGB information shown inside the coarse margin. Low: isolates each exact superpixel. High: gives the model surrounding visual context, which may improve continuity but can create overlapping predictions."],
   refineMargin: ["Refine margin", "Extra render pixels around refinement crops. Low: tightly localized paths. High: more cross-boundary freedom and overlap."],
   workingResolution: ["Working resolution", "Maximum internal raster dimension. Low: faster and lighter, but loses small details. High: sharper detail with much higher time and memory cost."],
   coarseCompactness: ["Coarse compactness", "Balances color boundaries against regular region shape. Low: follows image colors and edges. High: creates more uniform, geometric regions."],
@@ -157,7 +158,7 @@ $("resetButton").addEventListener("click", () => {
   [els.pathNum, els.refine, els.optimize].forEach(el => el.dispatchEvent(new Event("input")));
   $("device").value = $("device").querySelector('option[value="cuda"]').disabled ? "cpu" : "cuda";
   $("batchSize").value = "64"; $("seed").value = 0;
-  $("coarseRegionSize").value = 64; $("coarseMargin").value = 2; $("refineMargin").value = 0; $("workingResolution").value = "512";
+  $("coarseRegionSize").value = 64; $("coarseMargin").value = 2; $("coarseContext").value = 0; $("refineMargin").value = 0; $("workingResolution").value = "512";
   $("coarseCompactness").value = 50; $("refineCompactness").value = 20; $("slicSigma").value = 5;
   $("learningRate").value = 0.001; $("pathPenalty").value = 0.000001;
 });
@@ -238,7 +239,7 @@ async function vectorize() {
         image: state.dataUrl, mime_type: state.file.type, path_num: Number(els.pathNum.value),
         optimize_iter: Number(els.optimize.value), refine_paths_per_segment: Number(els.refine.value),
         refine_batch_size: Number($("batchSize").value), seed: Number($("seed").value), device: $("device").value,
-        coarse_paths_per_segment: Number($("coarseRegionSize").value), coarse_margin: Number($("coarseMargin").value),
+        coarse_paths_per_segment: Number($("coarseRegionSize").value), coarse_margin: Number($("coarseMargin").value), coarse_context_strength: Number($("coarseContext").value),
         refine_margin: Number($("refineMargin").value), working_resolution: Number($("workingResolution").value),
         coarse_compactness: Number($("coarseCompactness").value), refine_compactness: Number($("refineCompactness").value),
         slic_sigma: Number($("slicSigma").value), learning_rate: Number($("learningRate").value), path_penalty: Number($("pathPenalty").value)

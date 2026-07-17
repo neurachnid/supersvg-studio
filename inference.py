@@ -66,6 +66,7 @@ def get_args_parser():
     parser.add_argument("--refine_batch_size", type=int, default=PREDICT_BATCH_SIZE, help="batch size for refine")
     parser.add_argument("--coarse_paths_per_segment", type=int, default=PATHS_PER_SEGMENT_FOR_SEGMENT_ESTIMATE, help="target paths represented by each coarse SLIC region")
     parser.add_argument("--coarse_margin", type=int, default=2, help="coarse crop margin in render pixels")
+    parser.add_argument("--coarse_context_strength", type=float, default=0.0, help="neighboring RGB visibility inside the coarse margin")
     parser.add_argument("--refine_margin", type=int, default=0, help="refine crop margin in render pixels")
     parser.add_argument("--working_resolution", type=int, default=RENDER_WIDTH, help="maximum internal render dimension")
     parser.add_argument("--coarse_compactness", type=float, default=50.0)
@@ -192,7 +193,7 @@ def save_slic_diagnostic(image, render_size, num_segments, sigma, compactness, o
 
 
 @torch.inference_mode()
-def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=2, compactness=50.0, sigma=5.0):
+def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(RENDER_WIDTH, RENDER_WIDTH), margin=2, compactness=50.0, sigma=5.0, context_strength=0.0, diagnostic_path=None):
     model.width = render_size[0]
     model.height = render_size[1]
     image_np = np.array(image.resize(render_size)) / 255.0
@@ -202,6 +203,7 @@ def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(REND
 
     crops = []
     masks = []
+    support_masks = []
     coords = []
     kernel_size = max(1, 2 * int(margin) + 1)
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
@@ -220,19 +222,29 @@ def decode_by_id_map(image, model, device, num_of_segments=32, render_size=(REND
         crop = image_tensor * seg_mask_dilate.unsqueeze(0)
         crop = crop[:, x1 : x2 + 1, y1 : y2 + 1]
         mask = seg_mask[x1 : x2 + 1, y1 : y2 + 1].unsqueeze(0)
+        support = seg_mask_dilate[x1 : x2 + 1, y1 : y2 + 1].unsqueeze(0)
         crops.append(resize_224(crop))
         masks.append((resize_224(mask) > 0.5).float())
+        support_masks.append((resize_224(support) > 0.5).float())
 
-    crops = torch.stack(crops, dim=0).to(device).float()
-    masks = torch.stack(masks, dim=0).to(device).float()
+    crops = torch.stack(crops, dim=0).float()
+    masks = torch.stack(masks, dim=0).float()
+    support_masks = torch.stack(support_masks, dim=0).float()
+    ring_masks = (support_masks - masks).clamp(0, 1)
+    context_strength = float(max(0.0, min(1.0, context_strength)))
+    if diagnostic_path is not None:
+        diagnostic = crops * masks + context_strength * crops * ring_masks + 0.08 * (1 - masks - context_strength * ring_masks)
+        save_image(diagnostic.clamp(0, 1), str(diagnostic_path), nrow=max(1, int(math.ceil(math.sqrt(len(crops))))), padding=3, pad_value=0.25)
+    model_inputs = crops * masks - (1 - masks) + context_strength * ring_masks * (crops + 1)
+    model_inputs = model_inputs.to(device)
 
-    if crops.size(0) <= PREDICT_BATCH_SIZE:
-        strokes = model.predict_path(crops * masks - (1 - masks), num=PATHS_PER_REGION)
+    if model_inputs.size(0) <= PREDICT_BATCH_SIZE:
+        strokes = model.predict_path(model_inputs, num=PATHS_PER_REGION)
     else:
         batched_strokes = []
-        for start in range(0, crops.size(0), PREDICT_BATCH_SIZE):
-            end = min(start + PREDICT_BATCH_SIZE, crops.size(0))
-            pred = model.predict_path(crops[start:end] * masks[start:end] - (1 - masks[start:end]), num=PATHS_PER_REGION)
+        for start in range(0, model_inputs.size(0), PREDICT_BATCH_SIZE):
+            end = min(start + PREDICT_BATCH_SIZE, model_inputs.size(0))
+            pred = model.predict_path(model_inputs[start:end], num=PATHS_PER_REGION)
             batched_strokes.append(pred)
         strokes = torch.cat(batched_strokes, dim=0)
 
@@ -489,7 +501,9 @@ def main(args):
         save_slic_diagnostic(image, render_size, num_of_segments, args.slic_sigma, args.coarse_compactness, slic_path)
         print(f"SUPERSVG_DIAGNOSTIC slic {slic_path}", flush=True)
         report_progress(int(file_start + file_span * 0.12), "Building coarse vector paths")
-        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size, margin=args.coarse_margin, compactness=args.coarse_compactness, sigma=args.slic_sigma)
+        crop_diagnostic_path = output_dir / f"{image_path.stem}.coarse-crops.png"
+        coarse_strokes, _ = decode_by_id_map(image, coarse_model, device, num_of_segments, render_size=render_size, margin=args.coarse_margin, compactness=args.coarse_compactness, sigma=args.slic_sigma, context_strength=args.coarse_context_strength, diagnostic_path=crop_diagnostic_path)
+        print(f"SUPERSVG_DIAGNOSTIC crops {crop_diagnostic_path}", flush=True)
         coarse_svg_path = output_dir / f"{image_path.stem}.coarse.svg"
         coarse_model.rendering(coarse_strokes, save_svg_path=str(coarse_svg_path))
         print(f"SUPERSVG_DIAGNOSTIC coarse {coarse_svg_path}", flush=True)

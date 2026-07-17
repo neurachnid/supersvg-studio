@@ -102,6 +102,7 @@ class VectorizeRequest(BaseModel):
     refine_batch_size: int = Field(default=64, ge=1, le=128)
     coarse_paths_per_segment: int = Field(default=64, ge=16, le=256)
     coarse_margin: int = Field(default=2, ge=0, le=32)
+    coarse_context_strength: float = Field(default=0.0, ge=0.0, le=1.0)
     refine_margin: int = Field(default=0, ge=0, le=32)
     working_resolution: int = Field(default=512, ge=256, le=1024)
     coarse_compactness: float = Field(default=50.0, ge=0.1, le=200.0)
@@ -205,6 +206,8 @@ def vectorize(payload: VectorizeRequest):
                 str(payload.coarse_paths_per_segment),
                 "--coarse_margin",
                 str(payload.coarse_margin),
+                "--coarse_context_strength",
+                str(payload.coarse_context_strength),
                 "--refine_margin",
                 str(payload.refine_margin),
                 "--working_resolution",
