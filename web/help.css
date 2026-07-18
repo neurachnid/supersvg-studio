@@ -40,3 +40,19 @@
 }
 
 .diagnostic-select:disabled { opacity: .4; }
+
+/* The output must be a complete, independent layer. Without an opaque
+   backing, transparent SVG pixels reveal the source raster underneath. */
+.output-clip,
+.svg-preview {
+  background: #fff;
+}
+
+.svg-preview > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: fill;
+}
