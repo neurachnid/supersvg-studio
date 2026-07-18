@@ -57,18 +57,24 @@ function clearSvgPreview() {
 
 function showSvgPreview(svg) {
   clearSvgPreview();
-  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-  state.svgUrl = URL.createObjectURL(blob);
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.alt = "SVG output preview";
-    image.onload = () => {
-      els.svgPreview.replaceChildren(image);
-      resolve();
-    };
-    image.onerror = () => reject(new Error("The SVG was generated but the browser could not render its preview."));
-    image.src = state.svgUrl;
+  const documentNode = new DOMParser().parseFromString(svg, "image/svg+xml");
+  if (documentNode.querySelector("parsererror")) throw new Error("The generated SVG could not be parsed for preview.");
+  const svgNode = documentNode.documentElement;
+  svgNode.querySelectorAll("script, foreignObject").forEach(node => node.remove());
+  svgNode.querySelectorAll("*").forEach(node => {
+    for (const attribute of [...node.attributes]) if (attribute.name.toLowerCase().startsWith("on")) node.removeAttribute(attribute.name);
   });
+  if (!svgNode.hasAttribute("viewBox")) {
+    const width = Number.parseFloat(svgNode.getAttribute("width"));
+    const height = Number.parseFloat(svgNode.getAttribute("height"));
+    if (width > 0 && height > 0) svgNode.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  }
+  svgNode.setAttribute("width", "100%");
+  svgNode.setAttribute("height", "100%");
+  svgNode.setAttribute("preserveAspectRatio", "none");
+  svgNode.setAttribute("aria-label", "SVG output preview");
+  els.svgPreview.replaceChildren(document.importNode(svgNode, true));
+  return Promise.resolve();
 }
 
 function showImagePreview(src) {

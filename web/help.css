@@ -56,3 +56,7 @@
   display: block;
   object-fit: fill;
 }
+
+/* Let inline SVG geometry repaint at the current zoom instead of keeping a
+   low-resolution cached texture for the transformed canvas. */
+.pan-layer { will-change: auto; }
